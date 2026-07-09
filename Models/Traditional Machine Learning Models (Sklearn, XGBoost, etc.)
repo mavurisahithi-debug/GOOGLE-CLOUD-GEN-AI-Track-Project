@@ -1,0 +1,4 @@
+import joblib
+
+# Model ni file loki save cheyataniki (.pkl format)
+joblib.dump(your_model_variable, 'my_ml_model.pkl')

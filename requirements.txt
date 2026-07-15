@@ -1,9 +1,7 @@
 streamlit
 torch
+torchvision
 transformers
-plotly
 numpy
-protobuf
-sentencepiece
-safetensors
+plotly
 google-genai

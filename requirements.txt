@@ -2,4 +2,8 @@ streamlit
 torch
 transformers
 plotly
-google-generativeai
+numpy
+protobuf
+sentencepiece
+safetensors
+google-genai

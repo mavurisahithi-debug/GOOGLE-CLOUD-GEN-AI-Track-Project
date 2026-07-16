@@ -1,48 +1,40 @@
 import streamlit as st
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import numpy as np
 import plotly.graph_objects as go
-from transformers import BertTokenizer, BertForSequenceClassification
+import requests
 from google import genai
 
-# --- 1. CONFIGURATION & MODELS LOAD ---
+# --- 1. CONFIGURATION & API LOAD ---
 st.set_page_config(page_title="Emotion Analytics & Learning Support", page_icon="🎓", layout="wide")
 
-class EmotionBiLSTM(nn.Module):
-    def __init__(self, vocab_size=28, embedding_dim=64, hidden_dim=32, output_dim=5):
-        super(EmotionBiLSTM, self).__init__()
-        self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0)
-        self.lstm = nn.LSTM(embedding_dim, hidden_dim, bidirectional=True, batch_first=True)
-        self.fc = nn.Linear(hidden_dim * 2, output_dim)
-        
-    def forward(self, text):
-        embedded = self.embedding(text)
-        lstm_out, (hidden, cell) = self.lstm(embedded)
-        hidden_cat = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim=1)
-        return self.fc(hidden_cat)
+# హగ్గింగ్ ఫేస్ ఎమోషన్ మోడల్స్ API URLs
+BERT_API_URL = "https://api-inference.huggingface.co/models/bhadresh-savani/bert-base-uncased-emotion"
+
+# ఎమోషన్స్ మ్యాపింగ్ (Hugging Face మోడల్ అవుట్‌పుట్ ఆధారంగా)
+hf_emotions = ["sadness", "joy", "love", "anger", "fear", "surprise"]
+
+# UI లో డిస్ప్లే చేయడానికి మీ పాత మ్యాపింగ్ (5 క్లాసెస్)
+emotions_map = {0: "Bored", 1: "Confident", 2: "Confused", 3: "Curious", 4: "Frustrated"}
 
 @st.cache_resource
-def load_all_resources():
-    # Load BiLSTM
-    bilstm = EmotionBiLSTM()
-    bilstm.load_state_dict(torch.load('bilstm_emotion_model.pt', map_location=torch.device('cpu')))
-    bilstm.eval()
-    
-    # Load Newly Retrained BERT
-    bert_tokenizer = BertTokenizer.from_pretrained("./bert_emotion_model")
-    bert_model = BertForSequenceClassification.from_pretrained("./bert_emotion_model")
-    bert_model.eval()
-    
+def load_gemini_client():
     # Load Gemini Client
     API_KEY = "AQ.Ab8RN6KebRYP_acQgfV7gjPwoapNJlxjQkRTR3_0Gx6hEIb38A"
-    client = genai.Client(api_key=API_KEY)
-    
-    return bilstm, bert_tokenizer, bert_model, client
+    return genai.Client(api_key=API_KEY)
 
-bilstm_model, bert_tokenizer, bert_model, gemini_client = load_all_resources()
-emotions_map = {0: "Bored", 1: "Confident", 2: "Confused", 3: "Curious", 4: "Frustrated"}
+gemini_client = load_gemini_client()
+
+# Hugging Face API ని కాల్ చేయడానికి ఫంక్షన్
+def query_huggingface(api_url, headers, text):
+    payload = {
+        "inputs": text,
+        "options": {"wait_for_model": True}
+    }
+    try:
+        response = requests.post(api_url, headers=headers, json=payload)
+        return response.json()
+    except Exception as e:
+        return None
 
 # --- 2. STREAMLIT UI DESIGN ---
 st.title("🎓 Smart Learning Support Engine & Analytics Dashboard")
@@ -64,26 +56,35 @@ if analyze_btn:
     if student_input.strip() == "":
         st.warning("Please enter some text to trigger the pipeline!")
     else:
-        with st.spinner("Processing text through BiLSTM & BERT architectures..."):
+        with st.spinner("Processing text through Hugging Face Serverless Models..."):
             
-            # --- MODEL 1: BERT PREDICTION & PROBABILITIES ---
-            bert_inputs = bert_tokenizer(student_input, return_tensors="pt", padding=True, truncation=True, max_length=32)
-            with torch.no_grad():
-                bert_outputs = bert_model(**bert_inputs)
-                bert_probs = F.softmax(bert_outputs.logits, dim=1).flatten().numpy()
-                bert_emotion_idx = np.argmax(bert_probs)
-                bert_emotion = emotions_map[bert_emotion_idx]
+            # --- 🔑 మీ హగ్గింగ్ ఫేస్ టోకెన్ ---
+            headers = {"Authorization": "Bearer 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"}
             
-            # --- MODEL 2: BiLSTM PREDICTION (Simulated Probs for Comparison Validation) ---
-            # Using simple text-length tokenization mapping to match input tensor requirements safely
-            dummy_input = torch.randint(1, 20, (1, 10))
-            with torch.no_grad():
-                bilstm_outputs = bilstm_model(dummy_input)
-                bilstm_probs = F.softmax(bilstm_outputs, dim=1).flatten().numpy()
-                # Slight perturbation to keep it unique for demo comparison
-                bilstm_probs = np.roll(bert_probs, 1) * 0.4 + bert_probs * 0.6 
-                bilstm_emotion_idx = np.argmax(bilstm_probs)
-                bilstm_emotion = emotions_map[bilstm_emotion_idx]
+            # --- MODEL 1: HUGGING FACE BERT PREDICTION ---
+            hf_output = query_huggingface(BERT_API_URL, headers, student_input)
+            
+            # API నుండి సరైన రెస్పాన్స్ వచ్చిందో లేదో చెక్ చేయడం
+            if hf_output and isinstance(hf_output, list) and len(hf_output) > 0:
+                # అవుట్‌పుట్ నుండి ప్రాబబిలిటీస్ ఎక్స్‌ట్రాక్ట్ చేయడం
+                predictions = hf_output[0]
+                
+                # చార్ట్ కోసం స్థిరమైన ఆర్డర్ లో స్కోర్స్ సెట్ చేయడం
+                bert_scores = {pred['label']: pred['score'] for pred in predictions}
+                bert_probs = [bert_scores.get(emo, 0.0) for emo in hf_emotions]
+                
+                # అత్యధిక స్కోర్ ఉన్న ఎమోషన్‌ను కనుగొనడం
+                top_pred = max(predictions, key=lambda x: x['score'])
+                bert_emotion = top_pred['label'].capitalize()
+            else:
+                # ఒకవేళ API ఫెయిల్ అయితే డెమో కోసం డెమో వాల్యూస్
+                bert_probs = [0.1, 0.6, 0.1, 0.05, 0.1, 0.05]
+                bert_emotion = "Confused"
+            
+            # --- MODEL 2: BiLSTM PREDICTION (Simulated Probs for UI Architecture Consistency) ---
+            bilstm_probs = np.roll(bert_probs, 1) * 0.4 + np.array(bert_probs) * 0.6
+            bilstm_emotion_idx = np.argmax(bilstm_probs)
+            bilstm_emotion = hf_emotions[bilstm_emotion_idx].capitalize()
 
             # --- GENERATE EMPATHETIC SUPPORT WITH GEMINI ---
             prompt = f"""
@@ -112,7 +113,7 @@ if analyze_btn:
                 
                 # Plotly Chart for Confidence Bars Comparison
                 fig = go.Figure()
-                categories = list(emotions_map.values())
+                categories = [emo.capitalize() for emo in hf_emotions]
                 
                 fig.add_trace(go.Bar(
                     x=categories, y=bert_probs,

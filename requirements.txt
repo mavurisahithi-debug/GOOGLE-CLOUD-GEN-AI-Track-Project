@@ -1,7 +1,5 @@
 streamlit
-torch
-torchvision
-transformers
 numpy
 plotly
+requests
 google-genai
